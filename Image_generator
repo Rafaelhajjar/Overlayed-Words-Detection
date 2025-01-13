@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+import os
+import random
+import numpy as np
+import pandas as pd
+from PIL import Image, ImageDraw, ImageFont
+from pathlib import Path
+from tqdm import tqdm
+import sys
+
+# Constants for image generation
+IMAGE_SIZE = (256, 256)
+DEFAULT_OUTPUT_DIR = "./dataset"
+DEFAULT_DICT_FILE = "words.txt"
+NUM_IMAGES = 1000
+# try 3000 and 10000
+# Font cache for efficiency
+FONT_CACHE = {}
+
+def get_cached_font(font_path: str, font_size: int) -> ImageFont.FreeTypeFont:
+    """Cache fonts to avoid reloading."""
+    cache_key = (font_path, font_size)
+    if cache_key not in FONT_CACHE:
+        FONT_CACHE[cache_key] = ImageFont.truetype(font_path, font_size)
+    return FONT_CACHE[cache_key]
+
+def get_system_font_path():
+    """Get appropriate system font path."""
+    if os.name == 'nt':  # Windows
+        return r"C:\Windows\Fonts\arial.ttf"
+    elif sys.platform == "darwin":  # macOS
+        return "/System/Library/Fonts/Helvetica.ttc"
+    else:  # Linux
+        return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+def generate_dataset(output_dir=DEFAULT_OUTPUT_DIR, dict_file=DEFAULT_DICT_FILE, num_images=NUM_IMAGES):
+    """Generate synthetic images and metadata."""
+    # Load words from dictionary
+    with open(dict_file, 'r') as f:
+        words = [line.strip() for line in f if line.strip()]
+
+    # Create output directory
+    image_dir = Path(output_dir) / "images"
+    image_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata = []
+    font_path = get_system_font_path()
+    
+    for i in tqdm(range(num_images), desc="Generating images"):
+        word1, word2 = random.sample(words, 2)
+        
+        # Create images with transparency
+        base_img = Image.new("RGBA", IMAGE_SIZE, (255, 255, 255, 0))
+        word1_img = Image.new("RGBA", IMAGE_SIZE, (255, 255, 255, 0))
+        word2_img = Image.new("RGBA", IMAGE_SIZE, (255, 255, 255, 0))
+        
+        # Setup drawing
+        draw1 = ImageDraw.Draw(word1_img)
+        draw2 = ImageDraw.Draw(word2_img)
+        font = get_cached_font(font_path, 40)
+        
+        # Calculate text dimensions
+        bbox1 = draw1.textbbox((0, 0), word1, font=font)
+        text_width1 = bbox1[2] - bbox1[0]
+        text_height1 = bbox1[3] - bbox1[1]
+        
+        bbox2 = draw2.textbbox((0, 0), word2, font=font)
+        text_width2 = bbox2[2] - bbox2[0]
+        text_height2 = bbox2[3] - bbox2[1]
+        
+        # Center text
+        x_pos1 = (IMAGE_SIZE[0] - text_width1) // 2
+        y_pos1 = (IMAGE_SIZE[1] - text_height1) // 2
+        x_pos2 = (IMAGE_SIZE[0] - text_width2) // 2
+        y_pos2 = (IMAGE_SIZE[1] - text_height2) // 2
+        
+        # Draw words with transparency
+        draw1.text((x_pos1, y_pos1), word1, fill=(200, 0, 0, 64), font=font)
+        draw2.text((x_pos2, y_pos2), word2, fill=(0, 0, 200, 64), font=font)
+        
+        # Combine images
+        combined_img = Image.alpha_composite(base_img, word1_img)
+        combined_img = Image.alpha_composite(combined_img, word2_img)
+        combined_img = combined_img.convert("RGB")
+        
+        # Save image
+        filename = f"synthetic_{i:05d}.png"
+        combined_img.save(image_dir / filename)
+        metadata.append({"filename": filename, "word1": word1, "word2": word2})
+
+    # Save metadata
+    pd.DataFrame(metadata).to_csv(Path(output_dir) / "metadata.csv", index=False)
+    print(f"Generated dataset in {output_dir}")
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate synthetic text images")
+    parser.add_argument("--num_images", type=int, default=NUM_IMAGES, help="Number of images to generate")
+    parser.add_argument("--output_dir", type=str, default=DEFAULT_OUTPUT_DIR, help="Output directory")
+    parser.add_argument("--dict_file", type=str, default=DEFAULT_DICT_FILE, help="Dictionary file path")
+    args = parser.parse_args()
+    
+    generate_dataset(args.output_dir, args.dict_file, args.num_images)
